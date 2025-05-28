@@ -7,6 +7,7 @@ memory = Memory()  # можно заменить DI-подключением
 class Router:
     def __init__(self, agent_id="agent_001"):
         self.agent_id = agent_id
+        self.task_handler = None
 
     async def route(self, message: dict) -> dict:
         msg_type = message.get("type")
@@ -19,15 +20,22 @@ class Router:
 
         elif msg_type == "task":
             return self._handle_task(message)
+        
+        elif msg_type == "task_result":
+            task_id = message.get("task_id")
+            task = message.get("task")
+            result = message.get("result")
+            logger.info(f"📩 Результат задачи {task_id}:\n🔸 {task}\n✅ {result}")
+            return {"status": "received", "task_id": task_id}
 
         elif msg_type == "weights":
-            return {"status": "not_implemented"}
+            return self.handle_weights(self.agent_id)
 
         else:
             logger.warning(f"Неизвестный тип сообщения: {msg_type}")
             return {"error": "unknown message type"}
 
-    def _handle_memory_share(self, message: dict) -> dict:
+    def handle_memory_share(self, message: dict) -> dict:
         """Принимаем кусок чужой памяти"""
         try:
             entry = message["entry"]
@@ -41,6 +49,33 @@ class Router:
         except Exception as e:
             return {"status": "error", "details": str(e)}
 
-    def _handle_task(self, message: dict) -> dict:
-        """В будущем: выполнение заданной задачи"""
-        return {"status": "todo", "details": "task execution not implemented"}
+    def set_task_handler(self, handler):
+        self.task_handler = handler
+
+    async def _handle_task(self, message: dict) -> dict:
+        try:
+            task = message.get("task")
+            reply_to = message.get("reply_to")
+
+            if not task:
+                return {"error": "No task provided"}
+
+            logger.info(f"📥 Принята задача: {task}")
+
+            if self.task_handler:
+                await self.task_handler(task, reply_to)
+            else:
+                memory.store(
+                    agent_id=f"{self.agent_id}_task",
+                    observation=f"TASK: {task}",
+                    plan="Handler not set",
+                    result="Not executed"
+                )
+                return {"status": "saved", "note": "handler not set"}
+
+            return {"status": "accepted", "task": task}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def handle_weights(self, message: dict) -> dict:
+        return {"todo"}

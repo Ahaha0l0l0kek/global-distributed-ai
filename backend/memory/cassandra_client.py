@@ -40,4 +40,29 @@ class Memory:
         except Exception as e:
             logger.error(f"Ошибка выборки из Cassandra: {e}")
             return []
+        
+    def store_task(self, task_id, agent_id, task_str, reply_to):
+        now = datetime.utcnow()
+        host, port = reply_to if reply_to else (None, None)
+        self.session.execute(f"""
+            INSERT INTO agent_tasks (task_id, agent_id, task, reply_host, reply_port, status, created_at, updated_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        """, (task_id, agent_id, task_str, host, port, "pending", now, now))
+
+    def update_task_status(self, task_id, status, result=None):
+        now = datetime.utcnow()
+        self.session.execute(f"""
+            UPDATE agent_tasks
+            SET status = %s, result = %s, updated_at = %s
+            WHERE task_id = %s
+        """, (status, result, now, task_id))
+
+    def get_all_tasks(self, limit=50):
+        query = f"SELECT * FROM agent_tasks LIMIT %s"
+        return self.session.execute(query, (limit,))
+
+    def get_task_by_id(self, task_id: str):
+        query = f"SELECT * FROM agent_tasks WHERE task_id = %s"
+        rows = self.session.execute(query, (task_id,))
+        return rows.one()
 

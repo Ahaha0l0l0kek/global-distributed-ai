@@ -2,9 +2,11 @@ from fastapi import FastAPI
 from api.models import ObservationRequest, AgentMemoryEntry
 from api.agent_interface import AgentAPI
 from fastapi.middleware.cors import CORSMiddleware
+from api import tasks
 
 app = FastAPI()
 agent = AgentAPI()
+app.include_router(tasks.router)
 
 app.add_middleware(
     CORSMiddleware,

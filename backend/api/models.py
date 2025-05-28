@@ -10,3 +10,14 @@ class AgentMemoryEntry(BaseModel):
     observation: str
     plan: str
     result: str
+
+class TaskResponse(BaseModel):
+    task_id: str
+    agent_id: str
+    task: str
+    status: str
+    result: Optional[str]
+    created_at: datetime
+    updated_at: datetime
+    reply_host: Optional[str]
+    reply_port: Optional[int]

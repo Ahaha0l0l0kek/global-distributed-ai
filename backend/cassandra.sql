@@ -11,3 +11,15 @@ CREATE TABLE agent_memory (
     result TEXT,
     PRIMARY KEY (agent_id, timestamp)
 ) WITH CLUSTERING ORDER BY (timestamp DESC);
+
+CREATE TABLE agent_tasks (
+    task_id TEXT PRIMARY KEY,
+    agent_id TEXT,
+    task TEXT,
+    reply_host TEXT,
+    reply_port INT,
+    status TEXT,
+    result TEXT,
+    created_at TIMESTAMP,
+    updated_at TIMESTAMP
+);

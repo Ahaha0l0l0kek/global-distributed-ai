@@ -1,70 +1,134 @@
+import asyncio
 import time
 from memory.cassandra_client import Memory
 from llm.runtime import LLM
 from observation.web_scraper import scrape_page
 from loguru import logger
+from p2p.node import P2PNode
+from core.task_manager import TaskManager
 
 AGENT_ID = "agent_001"
-SCRAPE_URL = "https://news.ycombinator.com/"  # можно позже сделать динамическим
+SCRAPE_URL = "https://news.ycombinator.com"
+PEERS = [("127.0.0.1", 9009)]  # соседи вручную (или динамически в будущем)
 
 class AgentCore:
     def __init__(self):
-        logger.info("Инициализация ядра агента...")
+        logger.info("🧠 Инициализация AgentCore...")
         self.memory = Memory()
         self.llm = LLM()
+        self.p2p = P2PNode(agent_id=AGENT_ID, port=9009)
 
-    def observe(self) -> str:
-        """Сканируем внешнюю среду"""
+        self.task_queue = asyncio.Queue()
+        self.p2p.router.set_task_handler(self.enqueue_task)
+
+        self.task_manager = TaskManager()
+
+    async def observe(self) -> str:
         html = scrape_page(SCRAPE_URL)
-        logger.info("🧿 OBSERVE: Получен HTML.")
+        logger.info("🧿 OBSERVE: HTML загружен.")
         return html
 
     def plan(self, observation: str) -> str:
-        """LLM вырабатывает намерение или гипотезу"""
         prompt = f"""
-Ты — автономный ИИ-агент, сканирующий интернет.
-Вот выдержка из страницы (обрезанная):
+Ты — ИИ-агент, анализирующий сайт.
 <<<
 {observation}
 >>>
-На основе содержимого, что ты считаешь важным сделать? Ответь чётким действием, одной строкой.
+Сформулируй, что нужно сделать (1 строка).
 """
-        plan = self.llm.generate(prompt, max_tokens=64)
-        logger.info(f"🧠 PLAN: {plan}")
-        return plan
+        return self.llm.generate(prompt, max_tokens=64)
 
     def act(self, plan: str) -> str:
-        """Исполнение плана — пока только фиксация в логах"""
         logger.info(f"🤖 ACT: {plan}")
-        # В будущем — действия: API, навигация, обучение
         return f"Действие выполнено: {plan}"
 
     def learn(self, obs: str, plan: str, result: str):
-        """Запись в память"""
         self.memory.store(AGENT_ID, obs, plan, result)
-        logger.info("🧬 LEARN: Состояние записано.")
 
-    def print_recent_memory(self):
-        recent = self.memory.recent(AGENT_ID)
-        if recent:
-            logger.info("🧠 Последние записи памяти:")
-            for row in recent:
-                logger.info(f"[{row.timestamp}] План: {row.plan} → Результат: {row.result}")
+    def recent_entries(self, limit=3):
+        return self.memory.recent(AGENT_ID, limit=limit)
 
-    def run(self):
-        logger.info("🚀 Агент запущен.")
+    async def share_memory(self):
+        entries = self.recent_entries(limit=1)
+        if not entries:
+            return
+
+        for host, port in PEERS:
+            try:
+                await self.p2p.send(
+                    host, port,
+                    {
+                        "type": "memory_share",
+                        "entry": {
+                            "observation": entries[0].observation[:300],
+                            "plan": entries[0].plan,
+                            "result": entries[0].result,
+                        }
+                    }
+                )
+            except Exception as e:
+                logger.warning(f"❌ Не удалось отправить память {host}:{port}: {e}")
+
+    async def enqueue_task(self, task_str, reply_to=None, task_id=None):
+    if not task_id:
+        entry = self.task_manager.create(task_str, reply_to)
+        task_id = entry["id"]
+    await self.task_queue.put((task_id, task_str, reply_to))
+
+    async def run_task_worker(self):
+        while True:
+            task_id, task_str, reply_to = await self.task_queue.get()
+            logger.info(f"📥 Выполняем задачу {task_id}: {task_str}")
+            self.task_manager.mark_running(task_id)
+
+            result = "Задача не выполнена."
+
+            try:
+                if task_str.startswith("observe "):
+                    url = task_str[len("observe "):].strip()
+                    observation = scrape_page(url)
+                    plan = self.plan(observation)
+                    result = self.act(plan)
+                    self.learn(observation, plan, result)
+                    self.task_manager.mark_done(task_id, result)
+                    logger.info(f"✅ Задача {task_id} выполнена.")
+                else:
+                    raise ValueError("Неизвестный формат задачи")
+            except Exception as e:
+                result = f"❌ Ошибка: {e}"
+                self.task_manager.mark_failed(task_id, result)
+
+            if reply_to:
+                host, port = reply_to
+                await self.p2p.send(host, port, {
+                    "type": "task_result",
+                    "task_id": task_id,
+                    "task": task_str,
+                    "result": result,
+                    "from": self.agent_id,
+                    "to": f"{host}:{port}"
+                })
+
+    async def loop(self):
+        logger.info("🚀 AgentCore запущен.")
+        asyncio.create_task(self.p2p.start_server())
+        asyncio.create_task(self.run_task_worker())
+
         while True:
             try:
-                obs = self.observe()
+                obs = await self.observe()
                 plan = self.plan(obs)
                 result = self.act(plan)
                 self.learn(obs, plan, result)
-                self.print_recent_memory()
-                time.sleep(30)
+                await self.share_memory()
+                await asyncio.sleep(30)
             except Exception as e:
                 logger.error(f"🔥 Ошибка в цикле: {e}")
-                time.sleep(10)
+                await asyncio.sleep(10)
 
-if __name__ == "__main__":
-    agent = AgentCore()
-    agent.run()
+    def run_agent():
+        agent = AgentCore()
+        asyncio.run(agent.loop())
+
+    if __name__ == "__main__":
+        run_agent()
