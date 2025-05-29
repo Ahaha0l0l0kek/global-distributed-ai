@@ -30,6 +30,20 @@ class Router:
 
         elif msg_type == "weights":
             return self.handle_weights(self.agent_id)
+        
+        elif msg_type == "dna_offer":
+            incoming_dna = message.get("dna")
+            return self.agent.handle_dna_offer(incoming_dna)
+
+        elif msg_type == "dna_request":
+            return {
+                "type": "dna_offer",
+                "dna": self.agent.dna
+            }
+        
+        elif msg_type == "lora_request":
+            return self.agent.handle_lora_request(message.get("lora_id"), message.get("chunk", 0))
+
 
         else:
             logger.warning(f"Неизвестный тип сообщения: {msg_type}")

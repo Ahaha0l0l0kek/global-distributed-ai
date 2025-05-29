@@ -65,4 +65,24 @@ class Memory:
         query = f"SELECT * FROM agent_tasks WHERE task_id = %s"
         rows = self.session.execute(query, (task_id,))
         return rows.one()
+    
+    def get_expired_tasks(self, older_than_sec=60):
+        import datetime
+        from datetime import timedelta
+
+        threshold = datetime.datetime.utcnow() - timedelta(seconds=older_than_sec)
+        query = f"""
+            SELECT * FROM agent_tasks
+            WHERE status IN ('pending', 'running') ALLOW FILTERING
+        """
+        rows = self.session.execute(query)
+        return [r for r in rows if r.updated_at < threshold]
+
+    def bump_retry(self, task_id):
+        self.session.execute(f"""
+            UPDATE agent_tasks
+            SET retry_count = coalesce(retry_count, 0) + 1, updated_at = toTimestamp(now())
+            WHERE task_id = %s
+        """, (task_id,))
+
 

@@ -17,3 +17,10 @@ orjson==3.10.1
 loguru==0.7.2
 tqdm==4.66.2
 python-dotenv==1.0.1
+
+# LoRA
+transformers
+peft
+datasets
+accelerate
+bitsandbytes
